@@ -12,7 +12,7 @@ Catalog (frontend creates local artwork at the specified paths):
 - pen: Studio pen, WRITING TOOLS, A smoother train of thought., 2400, /products/pen.svg
 - cup: Arc pen cup, DESK ESSENTIALS, Keep good ideas close., 2800, /products/cup.svg
 
-Session: `{cart:[{productId,quantity}], coupon:null|{code:"WELCOME10",discountAmount:number}, subtotal:number, discount:number, total:number, order:null|{id:string,items:[{productId,name,price,quantity}],subtotal,discount,total,createdAt:string}}`. Totals are refreshed before serialization; discount reads the saved coupon amount. Cart quantity integer 1–99; setting zero removes line. Empty cart has zero totals and coupon null. An order copies the purchased items and totals. Successful payment clears cart/coupon and stores order. Cart changes clear previous order. State and catalog are authoritative; frontend derives no monetary values.
+Session: `{cart:[{productId,quantity}], coupon:null|{code:"WELCOME10",discountAmount:number}, subtotal:number, discount:number, total:number, lastPaymentError:null|{message:string,ref:string}, order:null|{id:string,items:[{productId,name,price,quantity}],subtotal,discount,total,createdAt:string}}`. Totals are refreshed before serialization; discount reads the saved coupon amount. Cart quantity integer 1–99; setting zero removes line. Empty cart has zero totals and coupon null. An order copies the purchased items and totals. Successful payment clears cart/coupon and stores order. Cart changes clear previous order. State and catalog are authoritative; frontend derives no monetary values.
 
 ## Actions
 
@@ -30,3 +30,7 @@ Other errors use `{error:{message,ref?}}` with appropriate 400/404 status. JSON 
 ## UI
 
 Three client screens only: shop, checkout, confirmed. Initial screen shop; cart always fetched from server on load; navigation to checkout loads latest state. Four products with original local SVG art. Promo prominently shows WELCOME10. Pre-filled synthetic shipping/payment details require no typing. Every interactive element has stable data-testid, at least 44px targets, focus-visible rings and accessible labels. Checkout at 1024x768 and 1280x720 must show cart quantity controls, coupon, all totals, pay and persistent failure callout without page scrolling. Frontend changes only shop/src, shop/public, shop/index.html and frontend configs; server owner handles package files, server modules and install/build coordination.
+
+## Saved payment error
+
+A failed payment stores `session.lastPaymentError` with the returned message and ref and persists it with `PERSIST_STATE=1`. On page load, a saved payment error opens checkout and displays the real saved banner. Successful cart/coupon changes, successful checkout and reset clear it. Legacy state files without this field load with null. The payment validation behavior is unchanged.

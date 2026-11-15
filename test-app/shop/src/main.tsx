@@ -24,6 +24,7 @@ type Session = {
   discount: number;
   total: number;
   order: Order | null;
+  lastPaymentError?: { message: string; ref: string } | null;
 };
 type State = { products: Product[]; session: Session };
 const yen = (v: number) => `¥${v.toLocaleString("ja-JP")}`;
@@ -48,13 +49,16 @@ function App() {
         throw Error("Unable to load your bag. Please refresh the page.");
       const d = await r.json();
       setData(d);
+      setError(d.session.lastPaymentError?.message || "");
       return d;
     } catch (e) {
       setError((e as Error).message);
     }
   }
   useEffect(() => {
-    refresh();
+    void refresh().then(d => {
+      if (d?.session.lastPaymentError && d.session.cart.length) setScreen("checkout");
+    });
   }, []);
   async function action(path: string, body?: unknown, method = "POST") {
     setBusy(true);
@@ -75,6 +79,7 @@ function App() {
         return;
       }
       setData(d);
+      setError(d.session.lastPaymentError?.message || "");
       if (path === "coupon") {
         setCoupon("");
         setCouponError("");
@@ -91,9 +96,9 @@ function App() {
     }
   }
   async function navigate(next: "shop" | "checkout") {
-    await refresh();
+    const refreshed = await refresh();
     setScreen(next);
-    setError("");
+    setError(refreshed?.session.lastPaymentError?.message || "");
     setCouponError("");
     window.scrollTo(0, 0);
   }

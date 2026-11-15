@@ -1,0 +1,9 @@
+@import "tailwindcss";
+@layer base {
+  :root { color-scheme: dark; }
+  body { @apply m-0 bg-[#121414] font-sans text-stone-200 antialiased; }
+  button, a, input, textarea, summary { @apply focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-lime-200; }
+  button:not(:disabled), summary { @apply cursor-pointer; }
+  ::selection { @apply bg-lime-200/25 text-lime-100; }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
+}

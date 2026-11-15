@@ -63,10 +63,11 @@ test('API behavior, payment validation, logging, and persisted restart', async (
       const changed = await request('/api/cart/quantity', { productId: 'tray', quantity: 2 });
       const failure = await request('/api/checkout', {}, 'POST', 500);
       assert.equal(failure.error.ref, 'PAY-500');
-      assert.deepEqual(await request('/api/debug/state', undefined, 'GET'), changed.session);
+      assert.deepEqual(await request('/api/debug/state', undefined, 'GET'), { ...changed.session, lastPaymentError: failure.error });
       const removed = await request('/api/coupon', undefined, 'DELETE');
       assert.deepEqual(removed.session.cart, changed.session.cart);
       assert.equal(removed.session.total, 6400);
+      assert.equal(removed.session.lastPaymentError, null);
       const paid = await request('/api/checkout', {});
       assert.equal(paid.session.order.total, 6400);
       assert.equal(paid.session.order.items[0].quantity, 2);
@@ -91,7 +92,7 @@ test('API behavior, payment validation, logging, and persisted restart', async (
     assert.deepEqual(state.session.coupon, { code: 'WELCOME10', discountAmount: 320 });
     state = await request('/api/cart/add', { productId: 'tray' });
     assert.equal(state.session.total, 6080);
-    const before = state.session;
+    const before = { ...state.session, lastPaymentError: { message: 'Something went wrong. We couldn’t process your payment.', ref: 'PAY-500' } };
     const failure = await request('/api/checkout', {}, 'POST', 500);
     assert.deepEqual(failure.error, { message: 'Something went wrong. We couldn’t process your payment.', ref: 'PAY-500' });
     assert.deepEqual(await request('/api/debug/state', undefined, 'GET'), before);
@@ -102,6 +103,7 @@ test('API behavior, payment validation, logging, and persisted restart', async (
       const failure = await request('/api/checkout', {}, 'POST', 500);
       assert.equal(failure.error.ref, 'PAY-500');
       assert.deepEqual(await request('/api/debug/state', undefined, 'GET'), before);
+      assert.deepEqual(JSON.parse(await readFile(path.join(directory, 'data/state.json'), 'utf8')).lastPaymentError, failure.error);
     });
     state = await request('/api/coupon', { code: 'WELCOME10' });
     assert.equal(state.session.total, 5760);
@@ -134,7 +136,7 @@ test('API behavior, payment validation, logging, and persisted restart', async (
       await stop();
       await start(false);
       assert.deepEqual((await request('/api/state', undefined, 'GET')).session, {
-        cart: [], coupon: null, subtotal: 0, discount: 0, total: 0, order: null,
+        cart: [], coupon: null, subtotal: 0, discount: 0, total: 0, order: null, lastPaymentError: null,
       });
       await request('/api/cart/add', { productId: 'pen' });
       await stop();

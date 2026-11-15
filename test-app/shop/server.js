@@ -14,7 +14,7 @@ const products = [
   { id: 'pen', name: 'Studio pen', category: 'WRITING TOOLS', description: 'A smoother train of thought.', price: 2400, image: '/products/pen.svg' },
   { id: 'cup', name: 'Arc pen cup', category: 'DESK ESSENTIALS', description: 'Keep good ideas close.', price: 2800, image: '/products/cup.svg' },
 ];
-const freshSession = () => ({ cart: [], coupon: null, subtotal: 0, discount: 0, total: 0, order: null });
+const freshSession = () => ({ cart: [], coupon: null, subtotal: 0, discount: 0, total: 0, order: null, lastPaymentError: null });
 let session = freshSession();
 function log(action, values = {}) {
   const line = JSON.stringify({ timestamp: new Date().toISOString(), action, ...values });
@@ -23,7 +23,7 @@ function log(action, values = {}) {
   fs.appendFileSync(logPath, `${line}\n`);
 }
 if (process.env.PERSIST_STATE === '1' && fs.existsSync(statePath)) {
-  session = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+  session = { ...freshSession(), ...JSON.parse(fs.readFileSync(statePath, 'utf8')) };
 }
 function refresh() { return refreshSession(session, products); }
 function envelope() { return { products, session: refresh() }; }
@@ -59,6 +59,7 @@ app.post('/api/cart/add', (req, res) => {
   if (item) item.quantity += 1;
   else session.cart.push({ productId: product.id, quantity: 1 });
   session.order = null;
+  session.lastPaymentError = null;
   save('cart.add', { productId: product.id });
   res.json(envelope());
 });
@@ -69,6 +70,7 @@ app.post('/api/cart/quantity', (req, res) => {
   if (!Number.isInteger(quantity) || quantity < 0 || quantity > 99) return error(res, 400, 'Quantity must be a whole number from 0 to 99.');
   setQuantity(session, product.id, quantity);
   session.order = null;
+  session.lastPaymentError = null;
   save('cart.quantity', { productId: product.id, quantity });
   res.json(envelope());
 });
@@ -78,11 +80,13 @@ app.post('/api/coupon', (req, res) => {
   refresh();
   if (!session.cart.length) return error(res, 400, 'Add an item before applying a promo code.');
   applyCoupon(session, code);
+  session.lastPaymentError = null;
   save('coupon.apply', { code });
   res.json(envelope());
 });
 app.delete('/api/coupon', (req, res) => {
   session.coupon = null;
+  session.lastPaymentError = null;
   save('coupon.remove');
   res.json(envelope());
 });
@@ -95,9 +99,11 @@ app.post('/api/checkout', (req, res) => {
   try {
     validatePayment(chargedAmount, expectedAmount);
   } catch (err) {
-    log('checkout.failed', { chargedAmount, expectedAmount, couponCode: session.coupon?.code ?? null, stack: err.stack });
-    return error(res, 500, 'Something went wrong. We couldn’t process your payment.', 'PAY-500');
+    session.lastPaymentError = { message: 'Something went wrong. We couldn’t process your payment.', ref: 'PAY-500' };
+    save('checkout.failed', { chargedAmount, expectedAmount, couponCode: session.coupon?.code ?? null, stack: err.stack });
+    return error(res, 500, session.lastPaymentError.message, session.lastPaymentError.ref);
   }
+  session.lastPaymentError = null;
   session.order = createOrder(session, products);
   session.cart = [];
   session.coupon = null;
