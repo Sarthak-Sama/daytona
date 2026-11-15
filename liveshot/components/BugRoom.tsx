@@ -1,6 +1,6 @@
 'use client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import LiveshotViewer from './LiveshotViewer';
+import LiveshotViewer, { NavBar, type ViewerControls } from './LiveshotViewer';
 import { ModeTag } from './StateBadge';
 import DevtoolsDock, { type DockTab } from './DevtoolsDock';
 import InvestigationPanel from './InvestigationPanel';
@@ -27,6 +27,7 @@ export default function BugRoom({ captureId }: { captureId: string }) {
   const [status, setStatus] = useState<{ busy: boolean; latency?: number }>({ busy: false });
   const [menu, setMenu] = useState(false);
   const switchedToLive = useRef(false);
+  const controls = useRef<ViewerControls | null>(null);
   const stillUrl = `/api/captures/${captureId}/still`;
   const steps = useMemo(() => recording?.steps ?? [], [recording]);
   const signals = useMemo(() => recording ? stepSignals(recording) : new Map(), [recording]);
@@ -138,13 +139,16 @@ export default function BugRoom({ captureId }: { captureId: string }) {
       <div className="order-1 flex min-h-0 min-w-0 flex-1 flex-col lg:order-2">
         <div className="relative h-[78vw] shrink-0 bg-[radial-gradient(ellipse_at_center,#1a1d1c_0%,#0a0b0b_70%)] p-3 md:p-6 lg:h-auto lg:min-h-0 lg:flex-1">
           <div className="grid h-full w-full place-items-center" style={{ containerType: 'size' }}>
-            <div className="relative" style={{ width: 'min(100cqw, calc(100cqh * 4 / 3))', aspectRatio: '4 / 3' }}>
+            <div className="flex flex-col gap-2" style={{ width: 'min(100cqw, calc((100cqh - 44px) * 4 / 3))' }}>
+            <NavBar disabled={state !== 'LIVE' || selected !== CAPTURED} onNav={action => controls.current?.nav(action)}><span className="ml-2 min-w-0 flex-1 truncate rounded bg-black/30 px-3 py-1 font-mono text-[11px] text-stone-500">{state === 'LIVE' ? 'Your private copy · live' : state === 'WAKING' ? 'Connecting…' : 'Captured moment · click the screen to take control'}</span></NavBar>
+            <div className="relative" style={{ aspectRatio: '4 / 3' }}>
               <div className={`absolute inset-0 overflow-hidden rounded-lg bg-[#080909] shadow-[0_40px_120px_-30px_rgba(0,0,0,.9)] ring-1 transition-all duration-700 ${state === 'LIVE' ? 'ring-lime-300/50 shadow-lime-300/5' : state === 'WAKING' ? 'ring-lime-200/30' : 'ring-white/15'}`}>
-                <LiveshotViewer bare stillUrl={stillUrl} sessionId={sessionId} interactive={state === 'LIVE'} waking={state === 'WAKING'} initialClick={copy.firstClick.current} onFirstClick={point => { setSelected(CAPTURED); void copy.wake(point); }} onReady={copy.onViewerReady} onError={copy.onViewerError} onInputComplete={copy.onInputComplete} onStatus={setStatus} />
+                <LiveshotViewer bare stillUrl={stillUrl} sessionId={sessionId} interactive={state === 'LIVE'} waking={state === 'WAKING'} initialClick={copy.firstClick.current} onFirstClick={point => { setSelected(CAPTURED); void copy.wake(point); }} onReady={copy.onViewerReady} onError={copy.onViewerError} onInputComplete={copy.onInputComplete} onStatus={setStatus} controls={controls} />
                 {state === 'STILL' && selected === CAPTURED && <TakeControlHint />}
                 {state === 'WAKING' && <WakingOverlay />}
                 {selected !== CAPTURED && <Replay captureId={captureId} steps={steps} n={selected} initialThumb={!!recording?.initialThumb} onExit={() => selectStep(CAPTURED)} live={state === 'LIVE'} />}
               </div>
+            </div>
             </div>
           </div>
           {copy.error && <p role="alert" className="absolute inset-x-4 bottom-3 mx-auto max-w-xl rounded-lg border border-red-300/20 bg-[#1c1111]/95 px-4 py-2.5 text-center text-sm text-red-200">{copy.error}{state === 'STILL' && <button onClick={() => void copy.wake()} className="ml-3 underline">Retry</button>}</p>}

@@ -1,12 +1,14 @@
 'use client';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
 import type { InputEvent } from '@/lib/machine/driver';
 import { api } from './client-api';
 export type Point = { x: number; y: number };
 type Frame = { image: string; mime: string; ts: number };
-type Props = { stillUrl?: string; sessionId?: string; interactive: boolean; onFirstClick?: (pt: Point) => void; initialClick?: Point | null; onReady?: () => void; onError?: (message: string) => void; waking?: boolean; onInputComplete?: () => void; bare?: boolean; onStatus?: (status: { busy: boolean; latency?: number }) => void };
+type Props = { stillUrl?: string; sessionId?: string; interactive: boolean; onFirstClick?: (pt: Point) => void; initialClick?: Point | null; onReady?: () => void; onError?: (message: string) => void; waking?: boolean; onInputComplete?: () => void; bare?: boolean; onStatus?: (status: { busy: boolean; latency?: number }) => void; controls?: MutableRefObject<ViewerControls | null> };
+export type NavAction = 'back' | 'forward' | 'reload';
+export type ViewerControls = { nav: (action: NavAction) => void };
 const keys: Record<string,string> = { Enter: 'enter', Backspace: 'backspace', Tab: 'tab', Escape: 'escape', Delete: 'delete', ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Home: 'home', End: 'end' };
-export default function LiveshotViewer({ stillUrl, sessionId, interactive, onFirstClick, initialClick, onReady, onError, waking, onInputComplete, bare = false, onStatus }: Props) {
+export default function LiveshotViewer({ stillUrl, sessionId, interactive, onFirstClick, initialClick, onReady, onError, waking, onInputComplete, bare = false, onStatus, controls }: Props) {
   const [src, setSrc] = useState(stillUrl || '');
   const [busy, setBusy] = useState(false);
   const [latency, setLatency] = useState<number>();
@@ -82,13 +84,15 @@ export default function LiveshotViewer({ stillUrl, sessionId, interactive, onFir
     return()=>{cancelled=true;generation.current++;timers.current.forEach(clearTimeout);if(typingTimer.current)clearTimeout(typingTimer.current);buffer.current='';};
   },[sessionId,stillUrl,showFrame,refresh]);
   useEffect(()=>{if(!interactive||!sessionId)return;const interval=setInterval(()=>{if(document.visibilityState==='visible')void refresh();},2000);return()=>clearInterval(interval);},[interactive,sessionId,refresh]);
+  if (controls) controls.current = { nav: action => { flush(); send({ type: 'nav', action }); } };
   const status = useRef(onStatus); status.current = onStatus;
   useEffect(() => { status.current?.({ busy, latency }); }, [busy, latency]);
   // React registers wheel listeners as passive, so preventDefault there cannot stop the page scrolling.
   const wheel = useRef<(event: WheelEvent) => void>(() => {});
   wheel.current = event => {
-    if (!interactive || !img.current) return;
+    // The snapshot owns the wheel: never let it scroll the page, even at the remote page's ends or before it is live.
     event.preventDefault();
+    if (!interactive || !img.current) return;
     if (Date.now() - lastScroll.current < 250) return;
     lastScroll.current = Date.now(); flush();
     send({ type: 'scroll', ...point(event.clientX, event.clientY), direction: event.deltaY > 0 ? 'down' : 'up', amount: Math.max(1, Math.min(5, Math.round(Math.abs(event.deltaY) / 80))) });
@@ -126,8 +130,9 @@ export default function LiveshotViewer({ stillUrl, sessionId, interactive, onFir
   function point(clientX:number,clientY:number):Point {const image=img.current!;const rect=image.getBoundingClientRect();return {x:Math.round((clientX-rect.left)*(image.naturalWidth/rect.width)),y:Math.round((clientY-rect.top)*(image.naturalHeight/rect.height))};}
   return <div className={bare?'h-full w-full':'mx-auto w-full max-w-[1050px]'}>
     <div className={bare?'relative h-full w-full overflow-hidden':`relative overflow-hidden rounded-sm border bg-[#080909] p-2 shadow-2xl shadow-black/30 transition-colors duration-500 md:p-3 ${interactive?'border-lime-300/35':'border-white/15'}`}>
+      {!bare&&<NavBar disabled={!interactive} onNav={action=>{flush();send({type:'nav',action});}} className="mb-2"/>}
       <div className={`absolute inset-x-0 top-0 z-10 h-0.5 bg-lime-300 transition-opacity ${busy?'animate-pulse opacity-100':'opacity-0'}`} />
-      <div ref={box} tabIndex={0} role="application" aria-label={interactive?'Interactive remote shop. Click the image, then type to control it.':'Captured shop. Click to wake a private copy.'} className={bare?'relative h-full w-full overflow-hidden outline-none':'relative mx-auto aspect-[4/3] w-full max-w-[1024px] overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-lime-200'} onPointerDown={event=>{if(!img.current?.naturalWidth||waking)return; event.preventDefault();box.current?.focus({preventScroll:true});flush();const pt=point(event.clientX,event.clientY);const r=img.current.getBoundingClientRect();setRipple({x:(event.clientX-r.left)/r.width*100,y:(event.clientY-r.top)/r.height*100,id:Date.now()});timers.current.push(setTimeout(()=>setRipple(undefined),500));if(interactive)send({type:'click',...pt,button:event.button===2?'right':'left'});else onFirstClick?.(pt);}} onContextMenu={event=>event.preventDefault()} onKeyDown={event=>{if(!interactive){if(event.key==='Enter'||event.key===' '){event.preventDefault();onFirstClick?.({x:0,y:0});}return;}const modifiers=[event.ctrlKey?'ctrl':'',event.metaKey?'meta':'',event.altKey?'alt':'',event.shiftKey?'shift':''].filter(Boolean);if(keys[event.key]||((event.ctrlKey||event.metaKey||event.altKey)&&event.key.length===1)){event.preventDefault();flush();send({type:'key',key:keys[event.key]||event.key.toLowerCase(),modifiers});}else if(event.key.length===1){event.preventDefault();buffer.current+=event.key;if(typingTimer.current)clearTimeout(typingTimer.current);typingTimer.current=setTimeout(flush,150);}}} >
+      <div ref={box} tabIndex={0} role="application" aria-label={interactive?'Interactive remote shop. Click the image, then type to control it.':'Captured shop. Click to wake a private copy.'} className={bare?'relative h-full w-full overflow-hidden overscroll-contain outline-none':'relative mx-auto aspect-[4/3] w-full max-w-[1024px] overflow-hidden overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-lime-200'} onPointerDown={event=>{if(!img.current?.naturalWidth||waking)return; event.preventDefault();box.current?.focus({preventScroll:true});flush();const pt=point(event.clientX,event.clientY);const r=img.current.getBoundingClientRect();setRipple({x:(event.clientX-r.left)/r.width*100,y:(event.clientY-r.top)/r.height*100,id:Date.now()});timers.current.push(setTimeout(()=>setRipple(undefined),500));if(interactive)send({type:'click',...pt,button:event.button===2?'right':'left'});else onFirstClick?.(pt);}} onContextMenu={event=>event.preventDefault()} onKeyDown={event=>{if(!interactive){if(event.key==='Enter'||event.key===' '){event.preventDefault();onFirstClick?.({x:0,y:0});}return;}const modifiers=[event.ctrlKey?'ctrl':'',event.metaKey?'meta':'',event.altKey?'alt':'',event.shiftKey?'shift':''].filter(Boolean);if(keys[event.key]||((event.ctrlKey||event.metaKey||event.altKey)&&event.key.length===1)){event.preventDefault();flush();send({type:'key',key:keys[event.key]||event.key.toLowerCase(),modifiers});}else if(event.key.length===1){event.preventDefault();buffer.current+=event.key;if(typingTimer.current)clearTimeout(typingTimer.current);typingTimer.current=setTimeout(flush,150);}}} >
         {src?<img ref={img} src={src} alt="The captured shop screen" draggable={false} className={`block h-full w-full select-none object-contain transition-opacity duration-150 ${interactive?'cursor-default':'cursor-pointer'}`} />:<div className="flex h-full items-center justify-center font-mono text-xs text-stone-500">Connecting to the machine…</div>}
         {ripple&&<span key={ripple.id} aria-hidden="true" className="pointer-events-none absolute h-8 w-8 -translate-x-1/2 -translate-y-1/2 animate-ping rounded-full border border-lime-300/50 [animation-iteration-count:1]" style={{left:`${ripple.x}%`,top:`${ripple.y}%`}}/>}
       </div>
@@ -135,5 +140,18 @@ export default function LiveshotViewer({ stillUrl, sessionId, interactive, onFir
     {!bare&&<><div className="mt-3 flex min-h-5 items-center justify-between gap-3 font-mono text-[10px] uppercase tracking-wider text-stone-500"><span>{waking?'Waking this moment up…':interactive?'Click & type directly on the image':'A captured moment. Click anywhere to continue.'}</span><span>{live?<><span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-lime-300 align-middle"/>LIVE{latency!==undefined?` · ${latency} ms`:''}</>:busy?'WORKING':latency!==undefined?`${latency} ms`:'1024 × 768'}</span></div>
     {error&&<p role="alert" className="mt-2 text-sm text-red-300">{error}</p>}</>}
     {interactive&&<form className="mt-3 hidden gap-2 [@media(pointer:coarse)]:flex" onSubmit={event=>{event.preventDefault();flush();if(mobileText)send({type:'type',text:mobileText});setMobileText('');}}><input aria-label="Text to type in remote shop" value={mobileText} onChange={event=>setMobileText(event.target.value)} placeholder="Type into the shop…" className="min-w-0 flex-1 rounded border border-white/20 bg-white/5 p-3 text-sm outline-none focus:border-lime-300"/><button className="rounded bg-lime-200 px-4 text-sm font-medium text-black">Send</button></form>}
+  </div>;
+}
+
+const navButtons: { action: NavAction; label: string; icon: string }[] = [
+  { action: 'back', label: 'Back', icon: 'M15 18l-6-6 6-6' },
+  { action: 'forward', label: 'Forward', icon: 'M9 6l6 6-6 6' },
+  { action: 'reload', label: 'Reload', icon: 'M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6' },
+];
+/** Browser controls for the remote page. Disabled until the viewer controls a live copy. */
+export function NavBar({ onNav, disabled, className = '', children }: { onNav: (action: NavAction) => void; disabled?: boolean; className?: string; children?: React.ReactNode }) {
+  return <div className={`flex h-9 items-center gap-1 rounded-md border border-white/10 bg-[#121414] px-1.5 ${className}`}>
+    {navButtons.map(b => <button key={b.action} type="button" disabled={disabled} onClick={() => onNav(b.action)} aria-label={b.label} title={disabled ? 'Take control to use the browser controls' : b.label} className="flex h-7 w-7 items-center justify-center rounded text-stone-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={b.icon} /></svg></button>)}
+    {children}
   </div>;
 }

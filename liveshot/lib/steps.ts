@@ -14,6 +14,9 @@ export function describeStep(step: RecordedStep): string {
     case 'key': return `Press ${step.key?.replace(/\b\w/g, c => c.toUpperCase())}`;
     case 'scroll': return `Scroll ${step.direction}`;
     case 'navigate': return `Open ${step.url}`;
+    case 'back': return 'Go back';
+    case 'forward': return 'Go forward';
+    case 'reload': return 'Reload the page';
   }
 }
 
@@ -74,6 +77,9 @@ export function playwrightTest(recording: Recording, options: { title: string; b
     else if (step.action === 'type') lines.push(`  await page.keyboard.type(${js(step.text || '')});`);
     else if (step.action === 'key') lines.push(`  await page.keyboard.press(${js((step.key || '').split('+').map(k => ({ enter: 'Enter', backspace: 'Backspace', tab: 'Tab', escape: 'Escape', ctrl: 'Control', meta: 'Meta', alt: 'Alt', shift: 'Shift', up: 'ArrowUp', down: 'ArrowDown', left: 'ArrowLeft', right: 'ArrowRight' } as Record<string, string>)[k] || k).join('+'))});`);
     else if (step.action === 'scroll') lines.push(`  await page.mouse.wheel(0, ${step.direction === 'up' ? -300 : 300});`);
+    else if (step.action === 'back') lines.push(`  await page.goBack();`);
+    else if (step.action === 'forward') lines.push(`  await page.goForward();`);
+    else if (step.action === 'reload') lines.push(`  await page.reload();`);
     else if (step.action === 'navigate') lines.push(`  await page.goto(${js(new URL(step.url, base).href)});`);
     if (watch) lines.push(`  // The tester saw ${watch.method} ${new URL(watch.url, base).pathname} → ${watch.status ?? watch.failure}`, `  expect((await response${step.n}).status(), ${js(`${watch.method} ${new URL(watch.url, base).pathname}`)}).toBeLessThan(400);`);
   }

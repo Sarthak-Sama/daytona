@@ -120,6 +120,7 @@ async function performInput(current: LocalMachine, event: InputEvent) {
   await current.recorder.beforeInput(event);
   if (event.type === 'click') await page.mouse.click(coordinate(event.x, 1024), coordinate(event.y, 768), { button: event.button || 'left', clickCount: event.double ? 2 : 1 });
   else if (event.type === 'type') await page.keyboard.type(event.text);
+  else if (event.type === 'nav') { const options = { waitUntil: 'load' as const, timeout: 10_000 }; if (event.action === 'back') await page.goBack(options); else if (event.action === 'forward') await page.goForward(options); else await page.reload(options); }
   else if (event.type === 'key') await page.keyboard.press([...(event.modifiers || []).map(keyName), keyName(event.key)].join('+'));
   else { await page.mouse.move(coordinate(event.x, 1024), coordinate(event.y, 768)); await page.mouse.wheel(0, (event.direction === 'up' ? -1 : 1) * (event.amount ?? 3) * 100); }
 }

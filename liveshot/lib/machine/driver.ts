@@ -20,4 +20,5 @@ export type InputEvent =
   | { type: 'click'; x: number; y: number; button?: 'left' | 'right'; double?: boolean }
   | { type: 'type'; text: string }
   | { type: 'key'; key: string; modifiers?: string[] }
-  | { type: 'scroll'; x: number; y: number; direction: 'up' | 'down'; amount?: number };
+  | { type: 'scroll'; x: number; y: number; direction: 'up' | 'down'; amount?: number }
+  | { type: 'nav'; action: 'back' | 'forward' | 'reload' };
