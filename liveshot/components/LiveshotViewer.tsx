@@ -4,9 +4,9 @@ import type { InputEvent } from '@/lib/machine/driver';
 import { api } from './client-api';
 export type Point = { x: number; y: number };
 type Frame = { image: string; mime: string; ts: number };
-type Props = { stillUrl?: string; sessionId?: string; interactive: boolean; onFirstClick?: (pt: Point) => void; initialClick?: Point | null; onReady?: () => void; onError?: (message: string) => void; waking?: boolean };
+type Props = { stillUrl?: string; sessionId?: string; interactive: boolean; onFirstClick?: (pt: Point) => void; initialClick?: Point | null; onReady?: () => void; onError?: (message: string) => void; waking?: boolean; onInputComplete?: () => void };
 const keys: Record<string,string> = { Enter: 'enter', Backspace: 'backspace', Tab: 'tab', Escape: 'escape', Delete: 'delete', ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Home: 'home', End: 'end' };
-export default function LiveshotViewer({ stillUrl, sessionId, interactive, onFirstClick, initialClick, onReady, onError, waking }: Props) {
+export default function LiveshotViewer({ stillUrl, sessionId, interactive, onFirstClick, initialClick, onReady, onError, waking, onInputComplete }: Props) {
   const [src, setSrc] = useState(stillUrl || '');
   const [busy, setBusy] = useState(false);
   const [latency, setLatency] = useState<number>();
@@ -23,7 +23,7 @@ export default function LiveshotViewer({ stillUrl, sessionId, interactive, onFir
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const lastScroll = useRef(0);
-  const callbacks = useRef({ onReady, onError }); callbacks.current = { onReady, onError };
+  const callbacks = useRef({ onReady, onError, onInputComplete }); callbacks.current = { onReady, onError, onInputComplete };
   const initial = useRef(initialClick); initial.current = initialClick;
   const showFrame = useCallback(async (frame: Frame, gen: number) => {
     if (gen !== generation.current || frame.ts < timestamp.current) return;
@@ -48,7 +48,7 @@ export default function LiveshotViewer({ stillUrl, sessionId, interactive, onFir
     chain.current = chain.current.catch(() => {}).then(async () => {
       if(gen!==generation.current) {pending.current--;return;}
       setBusy(true); const start = performance.now();
-      try { const frame = await api<Frame>(`/api/sessions/${sessionId}/input`, { method:'POST', body: JSON.stringify(event) }); await showFrame(frame,gen); setLatency(Math.round(performance.now()-start)); setError(''); }
+      try { const frame = await api<Frame>(`/api/sessions/${sessionId}/input`, { method:'POST', body: JSON.stringify(event) }); await showFrame(frame,gen); setLatency(Math.round(performance.now()-start)); setError(''); callbacks.current.onInputComplete?.(); }
       catch(err) { if(gen===generation.current) { setError((err as Error).message); callbacks.current.onError?.((err as Error).message); } }
       finally {pending.current--;if(gen===generation.current) setBusy(pending.current>0);}
     });
@@ -59,7 +59,7 @@ export default function LiveshotViewer({ stillUrl, sessionId, interactive, onFir
     const gen=++generation.current; timestamp.current=0; pending.current=0; chain.current=Promise.resolve(); setError('');
     if(!sessionId) {setSrc(stillUrl || '');return;}
     let cancelled=false;
-    (async()=>{setBusy(true);try{await showFrame(await api<Frame>(`/api/sessions/${sessionId}/frame`),gen);if(cancelled)return; callbacks.current.onReady?.();if(initial.current){const point=initial.current;initial.current=null;const frame=await api<Frame>(`/api/sessions/${sessionId}/input`,{method:'POST',body:JSON.stringify({type:'click',...point})});await showFrame(frame,gen);for(const delay of [700,1500])timers.current.push(setTimeout(()=>{if(gen===generation.current)void refresh();},delay));}box.current?.focus({preventScroll:true});}catch(err){if(!cancelled)callbacks.current.onError?.((err as Error).message);}finally{if(!cancelled)setBusy(false);}})();
+    (async()=>{setBusy(true);try{await showFrame(await api<Frame>(`/api/sessions/${sessionId}/frame`),gen);if(cancelled)return; callbacks.current.onReady?.();if(initial.current){const point=initial.current;initial.current=null;const frame=await api<Frame>(`/api/sessions/${sessionId}/input`,{method:'POST',body:JSON.stringify({type:'click',...point})});await showFrame(frame,gen);callbacks.current.onInputComplete?.();for(const delay of [700,1500])timers.current.push(setTimeout(()=>{if(gen===generation.current)void refresh();},delay));}box.current?.focus({preventScroll:true});}catch(err){if(!cancelled)callbacks.current.onError?.((err as Error).message);}finally{if(!cancelled)setBusy(false);}})();
     return()=>{cancelled=true;generation.current++;timers.current.forEach(clearTimeout);if(typingTimer.current)clearTimeout(typingTimer.current);buffer.current='';};
   },[sessionId,stillUrl,showFrame,refresh]);
   useEffect(()=>{if(!interactive||!sessionId)return;const interval=setInterval(()=>{if(document.visibilityState==='visible')void refresh();},2000);return()=>clearInterval(interval);},[interactive,sessionId,refresh]);
