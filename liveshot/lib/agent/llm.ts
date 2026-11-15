@@ -28,5 +28,16 @@ export async function createLlm():Promise<LlmRuntime>{
  const client=new OpenAI({apiKey:config.llmApiKey,baseURL:config.llmBaseUrl,timeout:90_000,maxRetries:0});
  const model=config.llmModel||(await client.models.list()).data[0]?.id;
  if(!model)throw new Error('The inference provider returned no models.');
- return {client:client as unknown as LlmClient,model,provider:config.llmProviderLabel,stub:false};
+ // Some served reasoning models leave content empty and put the answer in message.reasoning(_content).
+ const raw=client as unknown as LlmClient;
+ const wrapped:LlmClient={chat:{completions:{async create(request,options){
+  const response=await raw.chat.completions.create(request,options);
+  for(const choice of response.choices||[]){const m=choice.message as Message&{reasoning?:unknown;reasoning_content?:unknown};
+   const empty=m.content==null||(typeof m.content==='string'&&!m.content.trim());
+   const alt=typeof m.reasoning_content==='string'?m.reasoning_content:typeof m.reasoning==='string'?m.reasoning:'';
+   if(empty&&!m.tool_calls?.length&&alt.trim())m.content=alt;
+   delete m.reasoning;delete m.reasoning_content;}
+  return response;
+ }}}};
+ return {client:wrapped,model,provider:config.llmProviderLabel,stub:false};
 }
