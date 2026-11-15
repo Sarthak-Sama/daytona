@@ -9,6 +9,7 @@ export const inputSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('click'), x: coordinate, y: coordinate, button: z.enum(['left', 'right']).optional(), double: z.boolean().optional() }),
   z.object({ type: z.literal('type'), text: z.string().max(4096) }),
   z.object({ type: z.literal('key'), key: z.string().min(1).max(40), modifiers: z.array(z.enum(['ctrl', 'control', 'alt', 'shift', 'meta', 'super'])).max(4).optional() }),
+  z.object({ type: z.literal('nav'), action: z.enum(['back', 'forward', 'reload']) }),
   z.object({ type: z.literal('scroll'), x: coordinate, y: coordinate, direction: z.enum(['up', 'down']), amount: z.number().int().min(1).max(100).optional() }),
 ]);
 export const captureSchema = z.object({ note: z.string().trim().max(2000).optional() });

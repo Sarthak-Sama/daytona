@@ -75,6 +75,7 @@ export const daytonaDriver: MachineDriver = {
     if (event.type === 'click') await sb.computerUse.mouse.click(x,y,event.button || 'left',event.double || false);
     if (event.type === 'type') await sb.computerUse.keyboard.type(event.text);
     if (event.type === 'key') await (event.modifiers?.length ? sb.computerUse.keyboard.hotkey([...event.modifiers,event.key].join('+')) : sb.computerUse.keyboard.press(event.key));
+    if (event.type === 'nav') await sb.computerUse.keyboard.hotkey(event.action === 'back' ? 'alt+Left' : event.action === 'forward' ? 'alt+Right' : 'F5');
     if (event.type === 'scroll') await sb.computerUse.mouse.scroll(x,y,event.direction,event.amount || 3);
   }); },
   async exec(id,command,opts) { return serial(id,async () => {

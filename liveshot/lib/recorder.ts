@@ -5,7 +5,7 @@ import type { InputEvent } from './machine/driver';
 export interface StepTarget { label: string; testId?: string; role?: string; tag: string; text?: string }
 export interface RecordedStep {
   n: number; t: number; url: string;
-  action: 'click' | 'type' | 'key' | 'scroll' | 'navigate';
+  action: 'click' | 'type' | 'key' | 'scroll' | 'navigate' | 'back' | 'forward' | 'reload';
   x?: number; y?: number; text?: string; key?: string; direction?: 'up' | 'down';
   target?: StepTarget;
   hasThumb?: boolean;
@@ -86,10 +86,11 @@ export class Recorder {
     const last = this.recording.steps.at(-1);
     if (event.type === 'type' && last?.action === 'type' && Date.now() - last.t < 4000) { last.text = (last.text || '') + event.text; last.t = Date.now(); this.pendingThumb = last.n; return; }
     if (event.type === 'scroll' && last?.action === 'scroll' && last.direction === event.direction && Date.now() - last.t < 2000) { last.t = Date.now(); this.pendingThumb = last.n; return; }
-    const target = await describe(this.page, 'x' in event ? { x: event.x, y: event.y } : undefined).catch(() => undefined);
+    const target = event.type === 'nav' ? undefined : await describe(this.page, 'x' in event ? { x: event.x, y: event.y } : undefined).catch(() => undefined);
     const base = { url: this.page.url(), target };
     const step = event.type === 'click' ? this.addStep({ ...base, action: 'click', x: event.x, y: event.y })
       : event.type === 'type' ? this.addStep({ ...base, action: 'type', text: event.text })
+      : event.type === 'nav' ? this.addStep({ url: this.page.url(), action: event.action })
       : event.type === 'key' ? this.addStep({ ...base, action: 'key', key: [...(event.modifiers || []), event.key].join('+') })
       : this.addStep({ ...base, action: 'scroll', x: event.x, y: event.y, direction: event.direction });
     this.pendingThumb = step.n;
