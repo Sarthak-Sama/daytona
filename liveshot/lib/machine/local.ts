@@ -7,8 +7,9 @@ import { nanoid } from 'nanoid';
 import { config } from '../config';
 import type { Capture } from '../types';
 import type { InputEvent, MachineDriver } from './driver';
+import { Recorder } from '../recorder';
 
-type LocalMachine = { id: string; directory: string; port: number; process: ChildProcess; context: BrowserContext; page: Page };
+type LocalMachine = { id: string; directory: string; port: number; process: ChildProcess; context: BrowserContext; page: Page; recorder: Recorder };
 type LocalRuntime = { machines: Map<string, LocalMachine>; browser?: Promise<Browser>; golden?: Promise<{ sandboxId: string }>; queues: Map<string, Promise<unknown>> };
 const globalLocal = globalThis as typeof globalThis & { __liveshotLocal?: LocalRuntime };
 const runtime: LocalRuntime = globalLocal.__liveshotLocal ??= { machines: new Map(), queues: new Map() };
@@ -19,6 +20,8 @@ const truncate = (value: string) => value.length <= 4000 ? value : `${value.slic
 function machine(id: string) {
   const value = runtime.machines.get(id);
   if (!value) throw new Error('Local machine is no longer available');
+  // Machines created before a hot reload predate the recorder.
+  value.recorder ??= new Recorder(value.page);
   return value;
 }
 async function serial<T>(id: string, action: () => Promise<T>): Promise<T> {
@@ -78,13 +81,16 @@ async function createMachine(captureRef?: string): Promise<{ sandboxId: string }
     if (!ready) throw new Error('Local shop startup timed out');
     context = await (await browser()).newContext({ viewport: { width: 1024, height: 768 }, deviceScaleFactor: 1 });
     const page = await context.newPage();
+    const recorder = new Recorder(page);
     // Only preserve the path; the old machine's origin belongs to its private server.
     const target = new URL(metadata.url || '/', `http://127.0.0.1:${port}`);
     await page.goto(`http://127.0.0.1:${port}${target.pathname}${target.search}${target.hash}`, { waitUntil: 'networkidle' });
     await page.getByTestId('bag-button').waitFor();
     if (metadata.checkout) await page.getByTestId('bag-button').click();
     await page.evaluate(() => document.fonts.ready);
-    runtime.machines.set(id, { id, directory, port, process: child, context, page });
+    // Restoring the captured screen is setup, not something the user did.
+    recorder.reset();
+    runtime.machines.set(id, { id, directory, port, process: child, context, page, recorder });
     return { sandboxId: id };
   } catch (error) {
     if (context) await context.close().catch(() => undefined);
@@ -111,6 +117,7 @@ const keyName = (value: string) => keyNames[value.toLowerCase()] || value;
 const coordinate = (value: number, max: number) => Math.max(0, Math.min(max - 1, Math.round(value)));
 async function performInput(current: LocalMachine, event: InputEvent) {
   const { page } = current;
+  await current.recorder.beforeInput(event);
   if (event.type === 'click') await page.mouse.click(coordinate(event.x, 1024), coordinate(event.y, 768), { button: event.button || 'left', clickCount: event.double ? 2 : 1 });
   else if (event.type === 'type') await page.keyboard.type(event.text);
   else if (event.type === 'key') await page.keyboard.press([...(event.modifiers || []).map(keyName), keyName(event.key)].join('+'));
@@ -135,7 +142,19 @@ export const localDriver: MachineDriver = {
     });
   },
   async spawn(capture: Capture) { return createMachine(capture.sourceRef); },
-  async screenshot(id) { return serial(id, async () => ({ base64: (await machine(id).page.screenshot({ type: 'png' })).toString('base64'), mime: 'image/png' })); },
+  async screenshot(id) { return serial(id, async () => { const current = machine(id); const png = await current.page.screenshot({ type: 'png' }); current.recorder.frame(png); return { base64: png.toString('base64'), mime: 'image/png' }; }); },
+  recording(id) { return runtime.machines.has(id) ? machine(id).recorder.recording : undefined; },
+  stepThumb(id, n) { return runtime.machines.get(id)?.recorder?.thumbs.get(n); },
+  async resetRecording(id) {
+    return serial(id, async () => {
+      const current = machine(id);
+      await fetch(`http://127.0.0.1:${current.port}/api/debug/reset`, { method: 'POST' });
+      await current.page.goto(`http://127.0.0.1:${current.port}/`, { waitUntil: 'networkidle' });
+      await current.page.getByTestId('bag-button').waitFor();
+      current.recorder.reset();
+      current.recorder.frame(await current.page.screenshot({ type: 'png' }));
+    });
+  },
   async input(id, event) { return serial(id, () => performInput(machine(id), event)); },
   async exec(id, command, opts) {
     return serial(id, async () => {

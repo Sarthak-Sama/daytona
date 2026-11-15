@@ -183,6 +183,7 @@ export async function captureGolden(note?: string): Promise<Capture> {
     const directGolden = config.forkSource === 'golden' && driver.mode === 'fork';
     const sourceRef = directGolden ? golden.sandboxId : (await driver.capture(golden.sandboxId, id)).sourceRef;
     if (directGolden) store.locked = true;
+    await import('./recording').then(m => m.saveCaptureRecording(golden.sandboxId, id));
     const result: Capture = { id, createdAt: Date.now(), mode: driver.mode, stillPath, ...size, sourceRef, logsTail: logs.exitCode === 0 ? logs.output : '', debugState, ...(note ? { note } : {}) };
     store.captures.set(id, result); persistStore(); return result;
   });

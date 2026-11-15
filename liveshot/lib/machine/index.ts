@@ -28,6 +28,9 @@ function hybrid(base: MachineDriver): MachineDriver {
     input: (id, ev) => pick(id).input(id, ev),
     exec: (id, command, opts) => pick(id).exec(id, command, opts),
     destroy: id => pick(id).destroy(id),
+    recording: id => base.recording?.(id),
+    stepThumb: (id, n) => base.stepThumb?.(id, n),
+    resetRecording: base.resetRecording ? id => base.resetRecording!(id) : undefined,
   };
 }
 let composite: MachineDriver | undefined;

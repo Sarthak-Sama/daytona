@@ -8,3 +8,5 @@ node_modules/
 .next-qa/
 
 .next-build/
+.next-dev2/
+.pitch-build/

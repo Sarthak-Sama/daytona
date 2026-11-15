@@ -1,4 +1,5 @@
 import type { Capture, Mode } from '../types';
+import type { Recording } from '../recorder';
 
 export interface MachineDriver {
   mode: Mode;
@@ -9,6 +10,10 @@ export interface MachineDriver {
   exec(sandboxId: string, command: string, opts?: { cwd?: string; timeoutSec?: number }):
     Promise<{ exitCode: number; output: string }>;
   destroy(sandboxId: string): Promise<void>;
+  /** Optional: browser-level recording (steps, console, network). Local mode only. */
+  recording?(sandboxId: string): Recording | undefined;
+  stepThumb?(sandboxId: string, n: number): Buffer | undefined;
+  resetRecording?(sandboxId: string): Promise<void>;
 }
 
 export type InputEvent =
