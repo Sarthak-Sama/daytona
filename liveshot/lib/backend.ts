@@ -3,6 +3,7 @@ import path from 'node:path';
 import { nanoid } from 'nanoid';
 import { config } from './config';
 import { store, persistStore } from './store';
+import { kickFrames } from './frames';
 import { getDriver, getGoldenMachine } from './machine';
 import type { Capture, Session } from './types';
 import type { InputEvent } from './machine/driver';
@@ -142,16 +143,22 @@ export async function waitForSession(id: string): Promise<Session> {
 function requireReady(id: string) { const session = getSession(id); if (session.status !== 'ready') throw new ApiError(409, 'This copy is not ready.'); return session; }
 export async function sessionFrame(id: string) {
   const session = requireReady(id);
-  return withMachine(session.sandboxId, async () => { const frame = await getDriver().screenshot(session.sandboxId); return { image: frame.base64, mime: frame.mime, ts: Date.now() }; });
+  // Read-only: do not queue behind inputs. Stamp the frame when the screenshot starts so a slow poll never overwrites a newer input frame.
+  const ts = Date.now(); const frame = await getDriver().screenshot(session.sandboxId); return { image: frame.base64, mime: frame.mime, ts };
 }
-export async function sessionInput(id: string, event: InputEvent) {
+export async function sessionInput(id: string, event: InputEvent, streamed = false) {
   const session = requireReady(id);
   return withMachine(session.sandboxId, async () => {
     if (session.status !== 'ready') throw new ApiError(409, 'This copy is closed.');
     if (session.kind === 'tester' && store.locked) throw new ApiError(423, 'Captured: this machine is frozen.');
     session.lastInputAt = Date.now(); persistStore();
-    await getDriver().input(session.sandboxId, event); await sleep(350);
-    const frame = await getDriver().screenshot(session.sandboxId); return { image: frame.base64, mime: frame.mime, ts: Date.now() };
+    // Streaming viewers get the result from the live frame hub: sample while the input is in flight and again when it lands.
+    kickFrames(id);
+    await getDriver().input(session.sandboxId, event);
+    kickFrames(id);
+    if (streamed) return { ts: Date.now() };
+    await sleep(120);
+    const ts = Date.now(); const frame = await getDriver().screenshot(session.sandboxId); return { image: frame.base64, mime: frame.mime, ts };
   });
 }
 function dimensions(buffer: Buffer, mime: string): { width: number; height: number } {

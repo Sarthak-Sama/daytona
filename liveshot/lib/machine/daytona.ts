@@ -28,6 +28,12 @@ export async function getDaytonaGolden(): Promise<string> {
   if (sb.state !== 'started') throw new Error('Golden machine is not started. Run npm run setup-golden.');
   return sb.id;
 }
+const homes = new Map<string, string>();
+async function homeDir(id: string, sb: Sandbox) {
+  let home = homes.get(id);
+  if (!home) { home = await sdkCall(() => sb.getUserHomeDir(),30_000,true); if(!home) throw new Error('Sandbox did not report its home directory'); homes.set(id, home); }
+  return home;
+}
 const truncate = (s: string) => s.length <= 4000 ? s : `${s.slice(0,1950)}\n… output truncated …\n${s.slice(-2000)}`;
 export const daytonaDriver: MachineDriver = {
   mode: config.mode,
@@ -66,7 +72,8 @@ export const daytonaDriver: MachineDriver = {
     machines.set(sb.id,sb);
     return {sandboxId:sb.id};
   },
-  async screenshot(id) { return serial(id,async () => takeScreenshot(await getSandbox(id),await readMeasurements())); },
+  // Screenshots are read-only; serialize only inputs so a poll never delays a click.
+  async screenshot(id) { return takeScreenshot(await getSandbox(id),await readMeasurements()); },
   async input(id,event:InputEvent) { return serial(id,async () => {
     const sb = await getSandbox(id), measured = await readMeasurements();
     const x = 'x' in event ? Math.max(0,Math.min(measured.width-1,Math.round(event.x))) : 0;
@@ -77,12 +84,12 @@ export const daytonaDriver: MachineDriver = {
     if (event.type === 'key') await (event.modifiers?.length ? sb.computerUse.keyboard.hotkey([...event.modifiers,event.key].join('+')) : sb.computerUse.keyboard.press(event.key));
     if (event.type === 'scroll') await sb.computerUse.mouse.scroll(x,y,event.direction,event.amount || 3);
   }); },
-  async exec(id,command,opts) { return serial(id,async () => {
-    const sb = await getSandbox(id), home = await sdkCall(() => sb.getUserHomeDir(),30_000,true);
-    if(!home)throw new Error('Sandbox did not report its home directory');
+  // Callers that need ordering (the Detective) hold the backend machine lock; exec itself does not block inputs.
+  async exec(id,command,opts) { return (async () => {
+    const sb = await getSandbox(id), home = await homeDir(id,sb);
     const cwd = !opts?.cwd || opts.cwd === '~/shop' ? `${home}/shop` : opts.cwd;
     const result = await sdkCall(() => sb.process.executeCommand(command.replace(/~\/shop\b/g,shellQuote(`${home}/shop`)),cwd,{PORT:'3000'},opts?.timeoutSec || 20),(opts?.timeoutSec || 20)*1000+5000);
     return {exitCode:result.exitCode,output:truncate(result.result)};
-  }); },
-  async destroy(id) { return serial(id,async () => { await sdkCall(() => (machines.get(id) ? Promise.resolve(machines.get(id)!) : getSandbox(id)).then(sb => sb.delete(60,true)),65_000); machines.delete(id); }); },
+  })(); },
+  async destroy(id) { return serial(id,async () => { await sdkCall(() => (machines.get(id) ? Promise.resolve(machines.get(id)!) : getSandbox(id)).then(sb => sb.delete(60,true)),65_000); machines.delete(id); homes.delete(id); }); },
 };

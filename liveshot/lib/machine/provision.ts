@@ -126,7 +126,7 @@ export async function launchBrowser(sb:Sandbox,measured:Measurements):Promise<vo
   await sleep(4000);
   // A browser which exited as root explicitly asks for --no-sandbox; do not add it speculatively.
   const log=await sdkCall(()=>sb.process.executeCommand('cat /tmp/browser.log',undefined,undefined,5),10_000,true);
-  if(!firefox && !measured.noSandbox && /Running as root without --no-sandbox/.test(log.result)) { measured.noSandbox=true; return launchBrowser(sb,measured); }
+  if(!firefox && !measured.noSandbox && /Running as root without --no-sandbox|No usable sandbox/.test(log.result)) { measured.noSandbox=true; return launchBrowser(sb,measured); }
   await verifyShopWindow(sb);
 }
 interface ProvisionOptions { role:string; name:string; captureId?:string; runId?:string; state?:Buffer; logs?:Buffer; rehydrate?:boolean; measurements?:Measurements; client?:Daytona; }

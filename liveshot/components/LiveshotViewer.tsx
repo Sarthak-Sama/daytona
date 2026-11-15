@@ -23,17 +23,29 @@ export default function LiveshotViewer({ stillUrl, sessionId, interactive, onFir
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const lastScroll = useRef(0);
+  const streaming = useRef(false);
+  const lastPaint = useRef(0);
+  const awaiting = useRef<{start:number;ack?:number}|null>(null);
+  const [live, setLive] = useState(false);
   const callbacks = useRef({ onReady, onError, onInputComplete }); callbacks.current = { onReady, onError, onInputComplete };
   const initial = useRef(initialClick); initial.current = initialClick;
+  // Input-to-pixels latency: settled by the first frame (or "unchanged" tick) taken after the server performed the input.
+  const settle = useCallback((ts: number) => {
+    const wait = awaiting.current; if (wait?.ack === undefined || ts < wait.ack) return;
+    awaiting.current = null;
+    const elapsed = Math.round((lastPaint.current > wait.start ? lastPaint.current : performance.now()) - wait.start);
+    if (elapsed < 5000) setLatency(elapsed);
+  }, []);
   const showFrame = useCallback(async (frame: Frame, gen: number) => {
     if (gen !== generation.current || frame.ts < timestamp.current) return;
     const source = `data:${frame.mime};base64,${frame.image}`;
     await new Promise<void>((resolve, reject) => { const image = new Image(); image.onload = () => resolve(); image.onerror = () => reject(new Error('The frame could not load.')); image.src = source; });
     if (gen !== generation.current || frame.ts < timestamp.current) return;
-    timestamp.current = frame.ts; setSrc(source);
-  }, []);
+    timestamp.current = frame.ts; setSrc(source); lastPaint.current = performance.now();
+    settle(frame.ts);
+  }, [settle]);
   const refresh = useCallback(async () => {
-    if (!sessionId || pending.current) return;
+    if (!sessionId || pending.current || streaming.current) return;
     const gen = generation.current;
     pending.current++; setBusy(true);
     const start = performance.now();
@@ -48,18 +60,25 @@ export default function LiveshotViewer({ stillUrl, sessionId, interactive, onFir
     chain.current = chain.current.catch(() => {}).then(async () => {
       if(gen!==generation.current) {pending.current--;return;}
       setBusy(true); const start = performance.now();
-      try { const frame = await api<Frame>(`/api/sessions/${sessionId}/input`, { method:'POST', body: JSON.stringify(event) }); await showFrame(frame,gen); setLatency(Math.round(performance.now()-start)); setError(''); callbacks.current.onInputComplete?.(); }
+      try {
+        if (streaming.current) {
+          // Live stream: the server only performs the input; the resulting pixels arrive on the stream.
+          const ack = await api<{ts:number}>(`/api/sessions/${sessionId}/input?stream=1`, { method:'POST', body: JSON.stringify(event) });
+          awaiting.current = { start, ack: ack.ts }; if (timestamp.current >= ack.ts) settle(timestamp.current);
+        } else { const frame = await api<Frame>(`/api/sessions/${sessionId}/input`, { method:'POST', body: JSON.stringify(event) }); await showFrame(frame,gen); setLatency(Math.round(performance.now()-start)); }
+        setError(''); callbacks.current.onInputComplete?.();
+      }
       catch(err) { if(gen===generation.current) { setError((err as Error).message); callbacks.current.onError?.((err as Error).message); } }
       finally {pending.current--;if(gen===generation.current) setBusy(pending.current>0);}
     });
-    for(const delay of [700,1500]) timers.current.push(setTimeout(() => {if(gen===generation.current) void refresh();},delay));
+    if(!streaming.current) for(const delay of [900]) timers.current.push(setTimeout(() => {if(gen===generation.current) void refresh();},delay));
   },[sessionId,interactive,showFrame,refresh]);
   const flush = useCallback(() => {if(typingTimer.current) clearTimeout(typingTimer.current); if(buffer.current){const text=buffer.current;buffer.current='';send({type:'type',text});}},[send]);
   useEffect(() => {
     const gen=++generation.current; timestamp.current=0; pending.current=0; chain.current=Promise.resolve(); setError('');
     if(!sessionId) {setSrc(stillUrl || '');return;}
     let cancelled=false;
-    (async()=>{setBusy(true);try{await showFrame(await api<Frame>(`/api/sessions/${sessionId}/frame`),gen);if(cancelled)return; callbacks.current.onReady?.();if(initial.current){const point=initial.current;initial.current=null;const frame=await api<Frame>(`/api/sessions/${sessionId}/input`,{method:'POST',body:JSON.stringify({type:'click',...point})});await showFrame(frame,gen);callbacks.current.onInputComplete?.();for(const delay of [700,1500])timers.current.push(setTimeout(()=>{if(gen===generation.current)void refresh();},delay));}box.current?.focus({preventScroll:true});}catch(err){if(!cancelled)callbacks.current.onError?.((err as Error).message);}finally{if(!cancelled)setBusy(false);}})();
+    (async()=>{setBusy(true);try{await showFrame(await api<Frame>(`/api/sessions/${sessionId}/frame`),gen);if(cancelled)return; callbacks.current.onReady?.();if(initial.current){const point=initial.current;initial.current=null;const frame=await api<Frame>(`/api/sessions/${sessionId}/input`,{method:'POST',body:JSON.stringify({type:'click',...point})});await showFrame(frame,gen);callbacks.current.onInputComplete?.();for(const delay of [900])timers.current.push(setTimeout(()=>{if(gen===generation.current)void refresh();},delay));}box.current?.focus({preventScroll:true});}catch(err){if(!cancelled)callbacks.current.onError?.((err as Error).message);}finally{if(!cancelled)setBusy(false);}})();
     return()=>{cancelled=true;generation.current++;timers.current.forEach(clearTimeout);if(typingTimer.current)clearTimeout(typingTimer.current);buffer.current='';};
   },[sessionId,stillUrl,showFrame,refresh]);
   useEffect(()=>{if(!interactive||!sessionId)return;const interval=setInterval(()=>{if(document.visibilityState==='visible')void refresh();},2000);return()=>clearInterval(interval);},[interactive,sessionId,refresh]);
@@ -80,6 +99,30 @@ export default function LiveshotViewer({ stillUrl, sessionId, interactive, onFir
     element.addEventListener('wheel', listener, { passive: false });
     return () => element.removeEventListener('wheel', listener);
   }, []);
+  // Live frames by long-poll: the request is already waiting when a new frame exists, so pixels arrive as soon as they are taken.
+  // The 2 s polling above stays as the fallback whenever this loop is failing.
+  useEffect(()=>{
+    if(!interactive||!sessionId)return;
+    const gen=generation.current; const controller=new AbortController(); let stopped=false;
+    const pause=(ms:number)=>new Promise<void>(resolve=>{timers.current.push(setTimeout(resolve,ms));});
+    const down=()=>{streaming.current=false;setLive(false);};
+    (async()=>{
+      let failures=0;
+      while(!stopped&&gen===generation.current){
+        if(document.visibilityState!=='visible'){down();await pause(400);continue;}
+        try{
+          const response=await fetch(`/api/sessions/${sessionId}/frame?after=${timestamp.current}`,{cache:'no-store',signal:controller.signal});
+          if(!response.ok)throw new Error('frame');
+          const data=await response.json() as Frame|{ts:number;same:true};
+          if(stopped||gen!==generation.current)break;
+          failures=0; if(!streaming.current){streaming.current=true;setLive(true);}
+          if('image' in data) await showFrame(data,gen).catch(()=>{timestamp.current=Math.max(timestamp.current,data.ts);});
+          else if(data.ts>timestamp.current){timestamp.current=data.ts;settle(data.ts);}
+        }catch{ if(stopped)break; down(); failures++; await pause(Math.min(2500,400*failures)); }
+      }
+    })();
+    return()=>{stopped=true;controller.abort();down();awaiting.current=null;};
+  },[interactive,sessionId,showFrame,settle]);
   function point(clientX:number,clientY:number):Point {const image=img.current!;const rect=image.getBoundingClientRect();return {x:Math.round((clientX-rect.left)*(image.naturalWidth/rect.width)),y:Math.round((clientY-rect.top)*(image.naturalHeight/rect.height))};}
   return <div className={bare?'h-full w-full':'mx-auto w-full max-w-[1050px]'}>
     <div className={bare?'relative h-full w-full overflow-hidden':`relative overflow-hidden rounded-sm border bg-[#080909] p-2 shadow-2xl shadow-black/30 transition-colors duration-500 md:p-3 ${interactive?'border-lime-300/35':'border-white/15'}`}>
@@ -89,7 +132,7 @@ export default function LiveshotViewer({ stillUrl, sessionId, interactive, onFir
         {ripple&&<span key={ripple.id} aria-hidden="true" className="pointer-events-none absolute h-8 w-8 -translate-x-1/2 -translate-y-1/2 animate-ping rounded-full border border-lime-300/50 [animation-iteration-count:1]" style={{left:`${ripple.x}%`,top:`${ripple.y}%`}}/>}
       </div>
     </div>
-    {!bare&&<><div className="mt-3 flex min-h-5 items-center justify-between gap-3 font-mono text-[10px] uppercase tracking-wider text-stone-500"><span>{waking?'Waking this moment up…':interactive?'Click & type directly on the image':'A captured moment. Click anywhere to continue.'}</span><span>{busy?'WORKING':latency!==undefined?`${latency} ms`:'1024 × 768'}</span></div>
+    {!bare&&<><div className="mt-3 flex min-h-5 items-center justify-between gap-3 font-mono text-[10px] uppercase tracking-wider text-stone-500"><span>{waking?'Waking this moment up…':interactive?'Click & type directly on the image':'A captured moment. Click anywhere to continue.'}</span><span>{live?<><span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-lime-300 align-middle"/>LIVE{latency!==undefined?` · ${latency} ms`:''}</>:busy?'WORKING':latency!==undefined?`${latency} ms`:'1024 × 768'}</span></div>
     {error&&<p role="alert" className="mt-2 text-sm text-red-300">{error}</p>}</>}
     {interactive&&<form className="mt-3 hidden gap-2 [@media(pointer:coarse)]:flex" onSubmit={event=>{event.preventDefault();flush();if(mobileText)send({type:'type',text:mobileText});setMobileText('');}}><input aria-label="Text to type in remote shop" value={mobileText} onChange={event=>setMobileText(event.target.value)} placeholder="Type into the shop…" className="min-w-0 flex-1 rounded border border-white/20 bg-white/5 p-3 text-sm outline-none focus:border-lime-300"/><button className="rounded bg-lime-200 px-4 text-sm font-medium text-black">Send</button></form>}
   </div>;

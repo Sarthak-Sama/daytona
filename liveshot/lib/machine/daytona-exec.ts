@@ -30,9 +30,11 @@ async function lookup(id: string) {
 
 export const daytonaExecDriver: Pick<MachineDriver, 'spawn' | 'exec' | 'destroy' | 'screenshot' | 'input'> = {
   async spawn(capture, name) {
-    const saved = path.join(config.dataDir, 'local', 'captures', capture.sourceRef);
+    // Local captures keep logs/app.log under .data/local/captures/<ref>; rehydrate captures keep app.log in the absolute sourceRef directory.
+    const rehydrated = capture.mode === 'rehydrate';
+    const saved = rehydrated ? capture.sourceRef : path.join(config.dataDir, 'local', 'captures', capture.sourceRef);
     const state = await readOptional(path.join(saved, 'state.json'));
-    const logs = await readOptional(path.join(saved, 'logs', 'app.log'));
+    const logs = await readOptional(rehydrated ? path.join(saved, 'app.log') : path.join(saved, 'logs', 'app.log'));
     if (!state) throw new Error('AI_DRIVER=daytona needs a local capture (state.json missing)');
     const sb = await createSandbox(daytonaClient(), { name: `${name}-${Date.now().toString(36)}`.replace(/[^a-zA-Z0-9-]/g, 'x').toLowerCase(), labels: { app: 'liveshot', role: 'ai', captureId: capture.id } });
     try {
