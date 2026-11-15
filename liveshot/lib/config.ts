@@ -20,5 +20,7 @@ export const config = {
   llmModel: process.env.LLM_MODEL || '',
   llmProviderLabel: process.env.LLM_PROVIDER_LABEL || (process.env.OPENAI_API_KEY && !process.env.LLM_API_KEY ? 'OpenAI' : 'Nosana'),
   llmVision: process.env.LLM_VISION === '1',
+  // Reasoning tokens make every turn several times slower; off unless LLM_THINKING=1.
+  llmThinking: process.env.LLM_THINKING === '1',
   agentProtocol: process.env.AGENT_PROTOCOL === 'json' ? 'json' : 'tools',
 };

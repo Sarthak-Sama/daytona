@@ -34,6 +34,7 @@ export async function runLoop(options:LoopOptions):Promise<BugReport>{
   messages.push({role:tool?'tool':'user',...(tool?{tool_call_id:tool.id}:{}),content:JSON.stringify({n:step.n,command:step.command,exitCode:step.exitCode,output:step.output})});
  }
  for(let turn=0;turn<8;turn++){
+  if(turn===5||turn===7)messages.push({role:'user',content:'You are almost out of turns. Call submit_report now with what the commands above already prove.'});
   const response=await call(true);const message=response.choices[0]?.message;if(!message)throw new Error('Model returned no message.');
   if(protocol==='tools'&&message.tool_calls?.length){
    messages.push(message);

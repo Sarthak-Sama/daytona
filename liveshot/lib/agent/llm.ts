@@ -31,7 +31,9 @@ export async function createLlm():Promise<LlmRuntime>{
  // Some served reasoning models leave content empty and put the answer in message.reasoning(_content).
  const raw=client as unknown as LlmClient;
  const wrapped:LlmClient={chat:{completions:{async create(request,options){
-  const response=await raw.chat.completions.create(request,options);
+  // Sampling and template options are for self-hosted servers; OpenAI's own API rejects some of them.
+  const extra=/api\.openai\.com/.test(config.llmBaseUrl)?{}:{temperature:0.2,max_tokens:2500,...(config.llmThinking?{}:{chat_template_kwargs:{enable_thinking:false}})};
+  const response=await raw.chat.completions.create({...request,...extra} as unknown as CompletionRequest,options);
   for(const choice of response.choices||[]){const m=choice.message as Message&{reasoning?:unknown;reasoning_content?:unknown};
    const empty=m.content==null||(typeof m.content==='string'&&!m.content.trim());
    const alt=typeof m.reasoning_content==='string'?m.reasoning_content:typeof m.reasoning==='string'?m.reasoning:'';

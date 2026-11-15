@@ -30,6 +30,7 @@ export interface Investigation {
   steps: AgentStep[];         // appended live; the UI polls this
   report?: BugReport;
   error?: string;
+  startedAt?: number; finishedAt?: number;
 }
 
 export interface AgentStep {
