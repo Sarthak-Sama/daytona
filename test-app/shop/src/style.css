@@ -1,0 +1,34 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+@layer base {
+  body {
+    @apply m-0 bg-paper text-ink font-sans antialiased;
+  }
+  button,
+  a,
+  input {
+    @apply focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent;
+  }
+  button,
+  a {
+    -webkit-tap-highlight-color: transparent;
+  }
+  button {
+    @apply disabled:opacity-40;
+  }
+  ::selection {
+    @apply bg-accent text-white;
+  }
+}
+@layer components {
+  .eyebrow {
+    @apply font-mono text-[10px] tracking-[0.15em] uppercase;
+  }
+  .action {
+    @apply min-h-11 inline-flex items-center justify-center px-5 text-[12px] font-medium;
+  }
+  .serif {
+    @apply font-serif font-normal;
+  }
+}

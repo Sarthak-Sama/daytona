@@ -1,0 +1,5 @@
+{
+  "name": "form-and-field-demo",
+  "private": true,
+  "scripts": {"seed:bug": "node scripts/seed-bug.mjs", "test": "node --test tests/api.test.mjs"}
+}
