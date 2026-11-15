@@ -135,7 +135,7 @@ export const localDriver: MachineDriver = {
     });
   },
   async spawn(capture: Capture) { return createMachine(capture.sourceRef); },
-  async screenshot(id) { return serial(id, async () => ({ base64: (await machine(id).page.screenshot({ type: 'jpeg', quality: 70 })).toString('base64'), mime: 'image/jpeg' })); },
+  async screenshot(id) { return serial(id, async () => ({ base64: (await machine(id).page.screenshot({ type: 'png' })).toString('base64'), mime: 'image/png' })); },
   async input(id, event) { return serial(id, () => performInput(machine(id), event)); },
   async exec(id, command, opts) {
     return serial(id, async () => {
