@@ -186,7 +186,10 @@ export async function captureGolden(note?: string): Promise<Capture> {
     const result: Capture = { id, createdAt: Date.now(), mode: driver.mode, stillPath, ...size, sourceRef, logsTail: logs.exitCode === 0 ? logs.output : '', debugState, ...(note ? { note } : {}) };
     store.captures.set(id, result); persistStore(); return result;
   });
-  void prewarmCapture(capture.id); return capture;
+  void prewarmCapture(capture.id);
+  // Fire-and-forget: the diagnosis should arrive with the screenshot, but must never fail or delay the capture response.
+  void import('./agent/detective').then(m => m.startInvestigation(capture.id)).catch(error => console.error('[liveshot] auto-investigation failed:', error instanceof Error ? error.message : 'unknown error'));
+  return capture;
 }
 export function captureMetadata(id: string) {
   const capture = getCapture(id);
